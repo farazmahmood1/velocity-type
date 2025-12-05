@@ -1,30 +1,8 @@
-
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Mesh, ShaderMaterial, InstancedMesh, Object3D } from 'three';
 import * as THREE from 'three';
 import { WorldProps } from '../types';
-
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      group: any;
-      mesh: any;
-      cylinderGeometry: any;
-      meshStandardMaterial: any;
-      boxGeometry: any;
-      planeGeometry: any;
-      instancedMesh: any;
-      meshBasicMaterial: any;
-      coneGeometry: any;
-      hemisphereLight: any;
-      directionalLight: any;
-      fog: any;
-      shaderMaterial: any;
-      circleGeometry: any;
-    }
-  }
-}
 
 // Shader to curve the road
 const roadVertexShader = `
@@ -37,12 +15,7 @@ void main() {
   vUv = uv;
   vec3 pos = position;
   
-  // Curve equation: displace X based on Z distance squared
-  // We offset based on world position Z relative to camera (approx)
-  // Since road moves via texture offset, the mesh is static. 
-  // We just bend the mesh away from camera.
-  
-  float zDist = pos.z + 10.0; // Offset to start curve slightly ahead
+  float zDist = pos.z + 10.0;
   float curveAmount = uCurvature * 0.002;
   pos.x += curveAmount * zDist * zDist;
   
@@ -59,17 +32,17 @@ varying vec2 vUv;
 varying float vZ;
 
 void main() {
-  // Scroll texture
   vec2 uv = vUv;
   uv.y -= uTime * (uSpeed * 5.0 + 0.5);
   
   vec4 color = texture2D(uMap, uv);
   
-  // Fog effect in shader for smoother blend
-  float fogDensity = 0.02;
+  // Fog effect - brighter for day time
+  float fogDensity = 0.015;
   float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vZ * vZ);
   
-  gl_FragColor = mix(color, vec4(0.05, 0.05, 0.05, 1.0), clamp(fogFactor, 0.0, 1.0));
+  // Mix with Sky Color (Light Blue)
+  gl_FragColor = mix(color, vec4(0.6, 0.8, 1.0, 1.0), clamp(fogFactor, 0.0, 1.0));
 }
 `;
 
@@ -80,18 +53,36 @@ const RoadSegments = ({ speed, curvature }: { speed: number, curvature: number }
     canvas.width = 512;
     canvas.height = 512;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#222';
+    
+    // Road Asphalt
+    ctx.fillStyle = '#333';
     ctx.fillRect(0, 0, 512, 512);
     
-    // Draw lane lines
+    // Add noise/grain to asphalt
+    for(let i=0; i<5000; i++) {
+        ctx.fillStyle = Math.random() > 0.5 ? '#444' : '#222';
+        ctx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
+    }
+
+    // Center Lines
     ctx.fillStyle = '#fff';
     ctx.fillRect(250, 0, 12, 256); 
     ctx.fillRect(250, 300, 12, 256); 
     
-    // Draw side lines
-    ctx.fillStyle = '#f0db26'; 
+    // Side Lines
+    ctx.fillStyle = '#fff'; 
     ctx.fillRect(10, 0, 10, 512);
     ctx.fillRect(492, 0, 10, 512);
+
+    // Curbs (Red and White strips)
+    // Draw on the very edges
+    const curbWidth = 30;
+    const stripHeight = 64;
+    for(let y=0; y<512; y+=stripHeight) {
+        ctx.fillStyle = (y/stripHeight) % 2 === 0 ? '#cc0000' : '#ffffff';
+        ctx.fillRect(0, y, curbWidth, stripHeight); // Left curb
+        ctx.fillRect(512 - curbWidth, y, curbWidth, stripHeight); // Right curb
+    }
 
     const tex = new THREE.CanvasTexture(canvas);
     tex.wrapS = THREE.RepeatWrapping;
@@ -104,7 +95,6 @@ const RoadSegments = ({ speed, curvature }: { speed: number, curvature: number }
     if (materialRef.current) {
       materialRef.current.uniforms.uTime.value = state.clock.getElapsedTime();
       materialRef.current.uniforms.uSpeed.value = speed;
-      // Smoothly interpolate curvature
       materialRef.current.uniforms.uCurvature.value = THREE.MathUtils.lerp(
           materialRef.current.uniforms.uCurvature.value,
           curvature,
@@ -121,84 +111,58 @@ const RoadSegments = ({ speed, curvature }: { speed: number, curvature: number }
   }), [texture]);
 
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]} receiveShadow>
-      <planeGeometry args={[12, 200, 20, 200]} />
-      <shaderMaterial
-        ref={materialRef}
-        vertexShader={roadVertexShader}
-        fragmentShader={roadFragmentShader}
-        uniforms={uniforms}
-      />
-    </mesh>
+    <group>
+        {/* Road Surface */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]} receiveShadow>
+        <planeGeometry args={[14, 200, 20, 200]} />
+        <shaderMaterial
+            ref={materialRef}
+            vertexShader={roadVertexShader}
+            fragmentShader={roadFragmentShader}
+            uniforms={uniforms}
+        />
+        </mesh>
+        
+        {/* Grass Planes (Simple Green on sides) */}
+        {/* We use a large plane below road for grass */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.2, 0]} receiveShadow>
+            <planeGeometry args={[500, 500]} />
+            <meshStandardMaterial color="#4a8522" roughness={1} />
+        </mesh>
+    </group>
   );
 };
 
-const SpeedParticles = ({ speed, curvature }: { speed: number, curvature: number }) => {
-    const count = 300;
-    const meshRef = useRef<InstancedMesh>(null);
-    const dummy = useMemo(() => new Object3D(), []);
+const Clouds = ({ speed }: { speed: number }) => {
+    const groupRef = useRef<THREE.Group>(null);
     
-    const particles = useMemo(() => {
-        const temp = [];
-        for(let i=0; i<count; i++) {
-            temp.push({
-                x: (Math.random() - 0.5) * 40,
-                y: Math.random() * 8,
-                z: (Math.random() - 0.5) * 100 - 50,
-                speedOffset: Math.random() + 0.5,
-                initialX: (Math.random() - 0.5) * 40
-            });
-        }
-        return temp;
-    }, []);
-
     useFrame((state, delta) => {
-        if(!meshRef.current) return;
-        
-        particles.forEach((p, i) => {
-            // Move forward
-            p.z += (speed * 40 + 15) * delta * p.speedOffset;
-            
-            // Apply curve to particles
-            // x = x_orig + curve * z^2
-            // Since particles come towards us (positive Z direction roughly relative to spawn),
-            // We need to reverse logic: particles at far distance (negative Z) should be shifted.
-            const dist = p.z - 10; // offset
-            // When curvature is positive (right turn), road bends right (positive X).
-            // Particles should appear to follow that bend.
-            // Simplified: Shift X based on Z
-            
-            const curveShift = curvature * 0.002 * (p.z - 20) * (p.z - 20);
-            
-            // Check bounds and reset
-            if (p.z > 20) {
-                p.z = -150;
-                p.x = (Math.random() - 0.5) * 40; 
-                p.initialX = p.x;
+        if(groupRef.current) {
+            // Clouds move slowly backwards
+            groupRef.current.position.z += (speed * 5 + 2) * delta;
+            if(groupRef.current.position.z > 50) {
+                groupRef.current.position.z = -200;
             }
-
-            // If we are far away (negative Z), shift X
-            let finalX = p.initialX;
-            if (p.z < 0) {
-                 finalX += curveShift;
-            }
-
-            dummy.position.set(finalX, p.y, p.z);
-            // Stretch based on speed
-            const scaleZ = 1 + speed * 20;
-            dummy.scale.set(0.05, 0.05, scaleZ);
-            dummy.updateMatrix();
-            meshRef.current!.setMatrixAt(i, dummy.matrix);
-        });
-        meshRef.current.instanceMatrix.needsUpdate = true;
+        }
     });
 
     return (
-        <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
-            <boxGeometry args={[1, 1, 1]} />
-            <meshBasicMaterial color="cyan" transparent opacity={0.3} />
-        </instancedMesh>
-    );
+        <group ref={groupRef} position={[0, 30, -100]}>
+            {/* Simple low poly cloud clusters */}
+            <mesh position={[-40, 0, 0]}>
+                <sphereGeometry args={[15, 7, 7]} />
+                <meshStandardMaterial color="white" flatShading opacity={0.8} transparent />
+            </mesh>
+             <mesh position={[30, 5, -20]}>
+                <sphereGeometry args={[20, 7, 7]} />
+                <meshStandardMaterial color="white" flatShading opacity={0.8} transparent />
+            </mesh>
+            <mesh position={[10, -5, 40]}>
+                <sphereGeometry args={[12, 7, 7]} />
+                <meshStandardMaterial color="white" flatShading opacity={0.8} transparent />
+            </mesh>
+        </group>
+    )
 }
 
 const Scenery = ({ curvature }: { curvature: number }) => {
@@ -206,10 +170,9 @@ const Scenery = ({ curvature }: { curvature: number }) => {
 
     useFrame((state, delta) => {
         if(groupRef.current) {
-             // Rotate background slightly to enhance turn feeling
              groupRef.current.rotation.y = THREE.MathUtils.lerp(
                 groupRef.current.rotation.y,
-                -curvature * 0.2, // Counter-rotate scenery slightly
+                -curvature * 0.2, 
                 delta
              );
         }
@@ -217,35 +180,23 @@ const Scenery = ({ curvature }: { curvature: number }) => {
 
     return (
         <group ref={groupRef}>
-             {/* Distant Mountains - placed far enough to not need heavy curving */}
-             <mesh position={[-60, -5, -80]}>
-                <coneGeometry args={[50, 60, 4]} />
-                <meshStandardMaterial color="#0f0518" />
+             {/* Distant Mountains - Earth colors */}
+             <mesh position={[-60, -5, -100]}>
+                <coneGeometry args={[80, 70, 4]} />
+                <meshStandardMaterial color="#2d3a25" flatShading />
              </mesh>
-             <mesh position={[-30, -5, -120]}>
-                <coneGeometry args={[60, 90, 4]} />
-                <meshStandardMaterial color="#0a0210" />
-             </mesh>
-             
-             <mesh position={[60, -5, -70]}>
-                <coneGeometry args={[40, 70, 4]} />
-                <meshStandardMaterial color="#0f0518" />
-             </mesh>
-             <mesh position={[20, -5, -130]}>
-                <coneGeometry args={[70, 100, 4]} />
-                <meshStandardMaterial color="#0a0210" />
+             <mesh position={[-30, -5, -140]}>
+                <coneGeometry args={[90, 100, 4]} />
+                <meshStandardMaterial color="#3a4530" flatShading />
              </mesh>
              
-             {/* Moon/Sun */}
-             <mesh position={[0, 40, -150]}>
-                 <circleGeometry args={[20, 32]} />
-                 <meshBasicMaterial color="#ffcc00" fog={false} />
+             <mesh position={[60, -5, -90]}>
+                <coneGeometry args={[70, 80, 4]} />
+                <meshStandardMaterial color="#2d3a25" flatShading />
              </mesh>
-
-             {/* Ground Plane */}
-             <mesh rotation={[-Math.PI/2, 0, 0]} position={[0, -1, 0]}>
-                 <planeGeometry args={[1000, 1000]} />
-                 <meshStandardMaterial color="#050505" />
+             <mesh position={[20, -5, -160]}>
+                <coneGeometry args={[100, 120, 4]} />
+                <meshStandardMaterial color="#1e261a" flatShading />
              </mesh>
         </group>
     )
@@ -255,11 +206,21 @@ export const World: React.FC<WorldProps> = ({ speed, curvature }) => {
   return (
     <group>
       <RoadSegments speed={speed} curvature={curvature} />
-      <SpeedParticles speed={speed} curvature={curvature} />
+      <Clouds speed={speed} />
       <Scenery curvature={curvature} />
-      <hemisphereLight intensity={0.5} groundColor="#000000" skyColor="#111122" />
-      <directionalLight position={[10, 20, 5]} intensity={1.5} castShadow color="#ffaa00"/>
-      <fog attach="fog" args={['#050505', 20, 150]} />
+      
+      {/* Daylight setup */}
+      <hemisphereLight intensity={0.6} groundColor="#4a8522" skyColor="#87CEEB" />
+      <directionalLight 
+        position={[50, 100, 50]} 
+        intensity={1.5} 
+        castShadow 
+        color="#fffaf0" 
+        shadow-bias={-0.001}
+      />
+      
+      {/* Day fog */}
+      <fog attach="fog" args={['#87CEEB', 30, 200]} />
     </group>
   );
 };

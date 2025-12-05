@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { GameStatus, GameStats, Difficulty } from './types';
 import { fetchSentences } from './services/geminiService';
 import { GameScene } from './components/GameScene';
 import { TypingInterface } from './components/TypingInterface';
+import { AudioManager } from './components/AudioManager';
 
 const GAME_DURATION = 120; // 2 minutes
 
@@ -128,6 +128,9 @@ const App: React.FC = () => {
 
   return (
     <div className="relative w-full h-screen overflow-hidden bg-black font-sans text-white">
+      {/* Audio Manager */}
+      <AudioManager wpm={stats.wpm} gameStatus={status} />
+
       {/* 3D Background Layer */}
       <div className="absolute inset-0 z-0">
         <GameScene wpm={stats.wpm} isMoving={isMoving} />
@@ -223,6 +226,7 @@ const App: React.FC = () => {
       {status === GameStatus.PLAYING && (
         <TypingInterface 
           targetText={sentences[currentSentenceIndex] || "Loading..."}
+          nextText={sentences[currentSentenceIndex + 1]}
           userInput={userInput}
           onInputChange={handleInputChange}
           stats={stats}

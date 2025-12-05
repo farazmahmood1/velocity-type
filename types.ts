@@ -1,3 +1,4 @@
+import React from 'react';
 
 export enum GameStatus {
   IDLE = 'IDLE',
@@ -49,6 +50,7 @@ declare global {
       meshStandardMaterial: any;
       boxGeometry: any;
       planeGeometry: any;
+      sphereGeometry: any;
       instancedMesh: any;
       meshBasicMaterial: any;
       coneGeometry: any;
@@ -57,6 +59,10 @@ declare global {
       fog: any;
       shaderMaterial: any;
       circleGeometry: any;
+      ambientLight: any;
+      pointLight: any;
+      spotLight: any;
+      primitive: any;
     }
   }
 }

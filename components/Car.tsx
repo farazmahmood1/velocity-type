@@ -1,30 +1,8 @@
-
 import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Group } from 'three';
 import * as THREE from 'three';
 import { CarProps } from '../types';
-
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      group: any;
-      mesh: any;
-      cylinderGeometry: any;
-      meshStandardMaterial: any;
-      boxGeometry: any;
-      planeGeometry: any;
-      instancedMesh: any;
-      meshBasicMaterial: any;
-      coneGeometry: any;
-      hemisphereLight: any;
-      directionalLight: any;
-      fog: any;
-      shaderMaterial: any;
-      circleGeometry: any;
-    }
-  }
-}
 
 const Wheel = ({ position, rotation, speed, isFront, steerAngle }: { position: [number, number, number], rotation?: [number, number, number], speed: number, isFront?: boolean, steerAngle?: number }) => {
   const wheelRef = useRef<Group>(null);
@@ -32,11 +10,10 @@ const Wheel = ({ position, rotation, speed, isFront, steerAngle }: { position: [
   useFrame((state, delta) => {
     if (wheelRef.current) {
       // Rotate wheels based on speed
-      // The wheel mesh inside the group is rotated for rolling
-      // The group itself rotates for steering
-      const rollingMesh = wheelRef.current.children[0] as THREE.Mesh; // The cylinder mesh
+      const rollingMesh = wheelRef.current.children[0] as THREE.Mesh; 
       if(rollingMesh) {
-         rollingMesh.rotation.x -= (speed * 20 + 5) * delta; 
+         // Speed is positive, but we rotated the car 180 deg, so we might need to invert rotation direction relative to the mesh
+         rollingMesh.rotation.x += (speed * 20 + 5) * delta; 
       }
 
       if (isFront && steerAngle !== undefined) {
@@ -70,28 +47,29 @@ export const Car: React.FC<CarProps> = ({ speed, tilt, curvature }) => {
       const t = state.clock.getElapsedTime();
       chassisRef.current.position.y = 0.6 + Math.sin(t * 30) * 0.005;
       
-      // Pitch (Tilt) based on acceleration/deceleration
+      // Pitch (Tilt)
+      // When accelerating (speed up), car tilts back (positive X in local space if facing -Z, but we rotated 180)
+      // We are facing +Z (world) but rotated 180, so local forward is -Z.
       chassisRef.current.rotation.x = THREE.MathUtils.lerp(chassisRef.current.rotation.x, tilt, delta * 2);
 
-      // Roll (Banking) based on curvature (Turn)
-      // If curvature is positive (right turn), car rolls left (negative Z) slightly? No, car leans outside? 
-      // Actually usually cars lean OUT of the turn (body roll). 
-      // Right turn -> body leans Left.
-      const targetRoll = -curvature * 0.15;
+      // Roll (Banking)
+      // Right turn (curvature > 0) -> Body leans Left (Rotate Z positive)
+      const targetRoll = curvature * 0.15;
       chassisRef.current.rotation.z = THREE.MathUtils.lerp(chassisRef.current.rotation.z, targetRoll, delta * 2);
 
-      // Yaw (Turning) - rotate chassis slightly into the turn
-      const targetYaw = -curvature * 0.1;
-      chassisRef.current.rotation.y = THREE.MathUtils.lerp(chassisRef.current.rotation.y, targetYaw, delta * 2);
+      // Yaw (Turning)
+      const targetYaw = curvature * 0.1;
+      chassisRef.current.rotation.y = THREE.MathUtils.lerp(chassisRef.current.rotation.y, targetYaw + Math.PI, delta * 2);
     }
   });
 
   // Calculate steer angle for front wheels
-  // Max steer angle around 0.3 radians
+  // Curvature > 0 is right turn. Wheels should point right (negative Y in local inverted space?)
   const steerAngle = -curvature * 0.3;
 
   return (
-    <group ref={chassisRef}>
+    // Initial rotation Math.PI to face away from camera
+    <group ref={chassisRef} rotation={[0, Math.PI, 0]}>
       {/* Main Body */}
       <mesh position={[0, 0.2, 0]} castShadow receiveShadow>
         <boxGeometry args={[1.8, 0.5, 4]} />
@@ -126,7 +104,7 @@ export const Car: React.FC<CarProps> = ({ speed, tilt, curvature }) => {
         </mesh>
       </group>
 
-      {/* Headlights */}
+      {/* Headlights (Front is +Z in local space) */}
       <mesh position={[-0.6, 0.2, 2.01]}>
         <boxGeometry args={[0.4, 0.2, 0.1]} />
         <meshStandardMaterial color="#ccffcc" emissive="#ccffcc" emissiveIntensity={2} />
@@ -136,10 +114,15 @@ export const Car: React.FC<CarProps> = ({ speed, tilt, curvature }) => {
         <meshStandardMaterial color="#ccffcc" emissive="#ccffcc" emissiveIntensity={2} />
       </mesh>
 
-      {/* Taillights */}
+      {/* Taillights (Back is -Z in local space) */}
       <mesh position={[0, 0.3, -2.01]}>
          <boxGeometry args={[1.6, 0.15, 0.1]} />
-         <meshStandardMaterial color="#ff0000" emissive="#ff0000" emissiveIntensity={speed > 0 ? 1 : 3} /> 
+         <meshStandardMaterial color="#ff0000" emissive="#ff0000" emissiveIntensity={speed > 0 ? 2 : 5} /> 
+      </mesh>
+      {/* License Plate area */}
+      <mesh position={[0, 0.15, -2.02]}>
+          <planeGeometry args={[0.6, 0.2]} />
+          <meshStandardMaterial color="#fff" />
       </mesh>
 
       {/* Wheels */}

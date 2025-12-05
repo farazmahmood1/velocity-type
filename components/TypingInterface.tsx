@@ -3,6 +3,7 @@ import { GameStats } from '../types';
 
 interface TypingInterfaceProps {
   targetText: string;
+  nextText?: string;
   userInput: string;
   onInputChange: (input: string) => void;
   stats: GameStats;
@@ -11,6 +12,7 @@ interface TypingInterfaceProps {
 
 export const TypingInterface: React.FC<TypingInterfaceProps> = ({
   targetText,
+  nextText,
   userInput,
   onInputChange,
   stats,
@@ -18,7 +20,6 @@ export const TypingInterface: React.FC<TypingInterfaceProps> = ({
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   
-  // Keep focus on input
   useEffect(() => {
     const focusInterval = setInterval(() => {
       if (gameStatus === 'PLAYING' && document.activeElement !== inputRef.current) {
@@ -83,9 +84,20 @@ export const TypingInterface: React.FC<TypingInterfaceProps> = ({
       {/* Main Typing Area */}
       <div className="w-full max-w-4xl mx-auto mb-20 pointer-events-auto">
         <div className="relative bg-black/70 backdrop-blur-sm p-6 rounded-xl border border-gray-700 shadow-2xl">
-          <p className="font-mono text-xl md:text-2xl leading-relaxed whitespace-pre-wrap select-none">
+          {/* Current Line */}
+          <p className="font-mono text-xl md:text-2xl leading-relaxed whitespace-pre-wrap select-none mb-4">
             {renderText()}
           </p>
+          
+          {/* Next Line Preview */}
+          {nextText && (
+             <div className="border-t border-gray-700 pt-3">
+                <p className="font-mono text-lg text-gray-600 truncate opacity-70">
+                   {nextText}
+                </p>
+             </div>
+          )}
+
           <input
             ref={inputRef}
             type="text"
