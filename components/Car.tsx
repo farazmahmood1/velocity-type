@@ -38,10 +38,16 @@ const Wheel = ({ position, rotation, speed, isFront, steerAngle }: { position: [
   );
 };
 
-export const Car: React.FC<CarProps> = ({ speed, tilt, curvature }) => {
+export const Car: React.FC<CarProps> = ({ speed, tilt, curvature, color = "#e60000", lanePosition = 0 }) => {
   const chassisRef = useRef<Group>(null);
+  const containerRef = useRef<Group>(null);
   
   useFrame((state, delta) => {
+    if (containerRef.current) {
+        // Smoothly move to lane position
+        containerRef.current.position.x = THREE.MathUtils.lerp(containerRef.current.position.x, lanePosition, delta * 5);
+    }
+
     if (chassisRef.current) {
       // Subtle engine vibration
       const t = state.clock.getElapsedTime();
@@ -68,71 +74,73 @@ export const Car: React.FC<CarProps> = ({ speed, tilt, curvature }) => {
   const steerAngle = -curvature * 0.3;
 
   return (
-    // Initial rotation Math.PI to face away from camera
-    <group ref={chassisRef} rotation={[0, Math.PI, 0]}>
-      {/* Main Body */}
-      <mesh position={[0, 0.2, 0]} castShadow receiveShadow>
-        <boxGeometry args={[1.8, 0.5, 4]} />
-        <meshStandardMaterial color="#e60000" metalness={0.6} roughness={0.2} />
-      </mesh>
-      
-      {/* Cabin/Cockpit */}
-      <mesh position={[0, 0.7, -0.2]} castShadow>
-        <boxGeometry args={[1.4, 0.5, 2]} />
-        <meshStandardMaterial color="#111" metalness={0.9} roughness={0.1} />
-      </mesh>
-
-      {/* Hood Scoop */}
-      <mesh position={[0, 0.46, 1.2]} castShadow>
-         <boxGeometry args={[1.0, 0.1, 1.0]} />
-         <meshStandardMaterial color="#cc0000" />
-      </mesh>
-
-      {/* Spoiler */}
-      <group position={[0, 0.6, -1.8]}>
-        <mesh position={[0, 0.3, 0]}>
-          <boxGeometry args={[1.9, 0.1, 0.4]} />
-          <meshStandardMaterial color="#111" />
+    <group ref={containerRef}>
+        {/* Initial rotation Math.PI to face away from camera */}
+        <group ref={chassisRef} rotation={[0, Math.PI, 0]}>
+        {/* Main Body */}
+        <mesh position={[0, 0.2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[1.8, 0.5, 4]} />
+            <meshStandardMaterial color={color} metalness={0.6} roughness={0.2} />
         </mesh>
-        <mesh position={[-0.7, 0, 0]}>
-          <boxGeometry args={[0.1, 0.6, 0.2]} />
-          <meshStandardMaterial color="#111" />
+        
+        {/* Cabin/Cockpit */}
+        <mesh position={[0, 0.7, -0.2]} castShadow>
+            <boxGeometry args={[1.4, 0.5, 2]} />
+            <meshStandardMaterial color="#111" metalness={0.9} roughness={0.1} />
         </mesh>
-        <mesh position={[0.7, 0, 0]}>
-          <boxGeometry args={[0.1, 0.6, 0.2]} />
-          <meshStandardMaterial color="#111" />
+
+        {/* Hood Scoop */}
+        <mesh position={[0, 0.46, 1.2]} castShadow>
+            <boxGeometry args={[1.0, 0.1, 1.0]} />
+            <meshStandardMaterial color="#111" />
         </mesh>
-      </group>
 
-      {/* Headlights (Front is +Z in local space) */}
-      <mesh position={[-0.6, 0.2, 2.01]}>
-        <boxGeometry args={[0.4, 0.2, 0.1]} />
-        <meshStandardMaterial color="#ccffcc" emissive="#ccffcc" emissiveIntensity={2} />
-      </mesh>
-      <mesh position={[0.6, 0.2, 2.01]}>
-        <boxGeometry args={[0.4, 0.2, 0.1]} />
-        <meshStandardMaterial color="#ccffcc" emissive="#ccffcc" emissiveIntensity={2} />
-      </mesh>
+        {/* Spoiler */}
+        <group position={[0, 0.6, -1.8]}>
+            <mesh position={[0, 0.3, 0]}>
+            <boxGeometry args={[1.9, 0.1, 0.4]} />
+            <meshStandardMaterial color="#111" />
+            </mesh>
+            <mesh position={[-0.7, 0, 0]}>
+            <boxGeometry args={[0.1, 0.6, 0.2]} />
+            <meshStandardMaterial color="#111" />
+            </mesh>
+            <mesh position={[0.7, 0, 0]}>
+            <boxGeometry args={[0.1, 0.6, 0.2]} />
+            <meshStandardMaterial color="#111" />
+            </mesh>
+        </group>
 
-      {/* Taillights (Back is -Z in local space) */}
-      <mesh position={[0, 0.3, -2.01]}>
-         <boxGeometry args={[1.6, 0.15, 0.1]} />
-         <meshStandardMaterial color="#ff0000" emissive="#ff0000" emissiveIntensity={speed > 0 ? 2 : 5} /> 
-      </mesh>
-      {/* License Plate area */}
-      <mesh position={[0, 0.15, -2.02]}>
-          <planeGeometry args={[0.6, 0.2]} />
-          <meshStandardMaterial color="#fff" />
-      </mesh>
+        {/* Headlights (Front is +Z in local space) */}
+        <mesh position={[-0.6, 0.2, 2.01]}>
+            <boxGeometry args={[0.4, 0.2, 0.1]} />
+            <meshStandardMaterial color="#ccffcc" emissive="#ccffcc" emissiveIntensity={2} />
+        </mesh>
+        <mesh position={[0.6, 0.2, 2.01]}>
+            <boxGeometry args={[0.4, 0.2, 0.1]} />
+            <meshStandardMaterial color="#ccffcc" emissive="#ccffcc" emissiveIntensity={2} />
+        </mesh>
 
-      {/* Wheels */}
-      {/* Front Wheels Steer */}
-      <Wheel position={[-0.9, 0, 1.2]} speed={speed} isFront steerAngle={steerAngle} />
-      <Wheel position={[0.9, 0, 1.2]} speed={speed} isFront steerAngle={steerAngle} />
-      
-      {/* Rear Wheels Fixed */}
-      <Wheel position={[-0.9, 0, -1.2]} speed={speed} />
-      <Wheel position={[0.9, 0, -1.2]} speed={speed} />
+        {/* Taillights (Back is -Z in local space) */}
+        <mesh position={[0, 0.3, -2.01]}>
+            <boxGeometry args={[1.6, 0.15, 0.1]} />
+            <meshStandardMaterial color="#ff0000" emissive="#ff0000" emissiveIntensity={speed > 0 ? 2 : 5} /> 
+        </mesh>
+        {/* License Plate area */}
+        <mesh position={[0, 0.15, -2.02]}>
+            <planeGeometry args={[0.6, 0.2]} />
+            <meshStandardMaterial color="#fff" />
+        </mesh>
+
+        {/* Wheels */}
+        {/* Front Wheels Steer */}
+        <Wheel position={[-0.9, 0, 1.2]} speed={speed} isFront steerAngle={steerAngle} />
+        <Wheel position={[0.9, 0, 1.2]} speed={speed} isFront steerAngle={steerAngle} />
+        
+        {/* Rear Wheels Fixed */}
+        <Wheel position={[-0.9, 0, -1.2]} speed={speed} />
+        <Wheel position={[0.9, 0, -1.2]} speed={speed} />
+        </group>
     </group>
   );
 };
