@@ -22,6 +22,10 @@ const App: React.FC = () => {
   const [correctChars, setCorrectChars] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(GAME_DURATION);
 
+  // Visuals
+  const [isBraking, setIsBraking] = useState(false);
+  const brakeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Analysis Data Refs (Mutable to avoid re-renders)
   const historyRef = useRef<HistoryPoint[]>([]);
   const errorsRef = useRef<Record<string, number>>({});
@@ -200,6 +204,7 @@ const App: React.FC = () => {
     setTotalCharsTyped(0);
     setCorrectChars(0);
     setEndTime(null);
+    setIsBraking(false);
     
     // Reset Analysis Refs
     historyRef.current = [];
@@ -237,6 +242,14 @@ const App: React.FC = () => {
     }
   };
 
+  const triggerBrakes = () => {
+      setIsBraking(true);
+      if (brakeTimeoutRef.current) clearTimeout(brakeTimeoutRef.current);
+      brakeTimeoutRef.current = setTimeout(() => {
+          setIsBraking(false);
+      }, 500); // 500ms brake effect
+  };
+
   const handleInputChange = (input: string) => {
     if (status !== GameStatus.PLAYING || sentences.length === 0) return;
 
@@ -253,9 +266,10 @@ const App: React.FC = () => {
         if (typedChar === expectedChar) {
             setCorrectChars(prev => prev + 1);
         } else {
-            // Record Error
+            // Record Error and Brake
             const key = expectedChar.toLowerCase();
             errorsRef.current[key] = (errorsRef.current[key] || 0) + 1;
+            triggerBrakes();
         }
     }
 
@@ -275,6 +289,12 @@ const App: React.FC = () => {
     timeLeft: timeRemaining,
   };
 
+  // Adjust display speed based on braking status
+  // If braking, speed drops drastically for visual effect
+  let visualSpeed = stats.wpm / 100;
+  if (isBraking) {
+      visualSpeed *= 0.2; // Brake reduces visual speed to 20%
+  }
   const isMoving = status === GameStatus.PLAYING && stats.wpm > 5;
 
   return (
@@ -288,6 +308,7 @@ const App: React.FC = () => {
             opponentStats={opponentStats}
             progress={progress}
             myCarModel={myCar}
+            isBraking={isBraking}
         />
       </div>
 

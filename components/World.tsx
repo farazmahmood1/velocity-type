@@ -124,7 +124,58 @@ const DecorationObj = ({ position, type }: { position: [number, number, number],
     );
 };
 
-export const World: React.FC<WorldProps> = ({ speed, curvature }) => {
+const SpeedLines = ({ speed }: { speed: number }) => {
+    const groupRef = useRef<THREE.Group>(null);
+    const count = 30;
+    
+    // Create initial random positions
+    const initialPositions = useMemo(() => {
+        return new Array(count).fill(0).map(() => ({
+            x: (Math.random() - 0.5) * 30,
+            y: Math.random() * 5 + 1,
+            z: Math.random() * -100,
+            speedOffset: Math.random() * 0.5 + 0.5
+        }));
+    }, []);
+
+    useFrame((state, delta) => {
+        if (!groupRef.current) return;
+        
+        // Visual speed multiplier for lines
+        // If speed is low, lines disappear
+        const flowSpeed = speed * 100 * delta;
+        const opacity = THREE.MathUtils.clamp((speed - 0.5) * 2, 0, 0.5);
+
+        groupRef.current.children.forEach((mesh, i) => {
+            const data = initialPositions[i];
+            mesh.position.z += flowSpeed * data.speedOffset;
+
+            // Reset when passed camera
+            if (mesh.position.z > 5) {
+                mesh.position.z = -100 - Math.random() * 50;
+                mesh.position.x = (Math.random() - 0.5) * 30;
+                // Keep center clear for car
+                if (Math.abs(mesh.position.x) < 5) mesh.position.x += 10;
+            }
+
+            const mat = (mesh as THREE.Mesh).material as THREE.MeshBasicMaterial;
+            mat.opacity = opacity;
+        });
+    });
+
+    return (
+        <group ref={groupRef}>
+            {initialPositions.map((pos, i) => (
+                <mesh key={i} position={[pos.x, pos.y, pos.z]} rotation={[Math.PI / 2, 0, 0]}>
+                    <cylinderGeometry args={[0.05, 0.05, 5]} />
+                    <meshBasicMaterial color="#ccffff" transparent opacity={0} blending={THREE.AdditiveBlending} />
+                </mesh>
+            ))}
+        </group>
+    )
+}
+
+export const World: React.FC<WorldProps> = ({ speed, curvature, isBraking }) => {
   const roadRef = useRef<THREE.Mesh>(null);
   const grassLeftRef = useRef<THREE.Mesh>(null);
   const grassRightRef = useRef<THREE.Mesh>(null);
@@ -136,10 +187,10 @@ export const World: React.FC<WorldProps> = ({ speed, curvature }) => {
 
   useFrame((state, delta) => {
     // Pass time and curvature to shaders
-    const effectiveSpeed = Math.max(speed, 0.1); // Keep idle movement
+    // If braking, speed decreases visually in App.tsx, so effectiveSpeed naturally drops
+    const effectiveSpeed = Math.max(speed, 0.05); 
     
     // We increase uTime uniform to simulate forward movement in the texture
-    // The geometry stays static relative to Z, only X bends
     if(roadRef.current) {
         (roadRef.current.material as THREE.ShaderMaterial).uniforms.uTime.value += effectiveSpeed * delta;
         (roadRef.current.material as THREE.ShaderMaterial).uniforms.uCurvature.value = THREE.MathUtils.lerp(
@@ -167,11 +218,9 @@ export const World: React.FC<WorldProps> = ({ speed, curvature }) => {
             }
             
             // Apply bending to objects so they stick to the curved ground visual
-            // We approximate the shader's bending logic
             const zDist = child.position.z;
             const bendX = Math.pow(Math.abs(zDist), 2.0) * curvature * 0.0002;
             
-            // Initial X offset needs to be preserved
             const baseX = child.userData.baseX || child.position.x;
             child.position.x = baseX + bendX;
         });
@@ -217,6 +266,9 @@ export const World: React.FC<WorldProps> = ({ speed, curvature }) => {
       <group ref={decoGroupRef}>
           {decorations}
       </group>
+      
+      {/* Speed Lines Effect */}
+      <SpeedLines speed={speed} />
 
       <hemisphereLight intensity={0.8} groundColor="#4a8522" skyColor="#87CEEB" />
       <directionalLight 

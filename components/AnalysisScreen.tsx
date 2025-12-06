@@ -53,7 +53,8 @@ export const AnalysisScreen: React.FC<AnalysisScreenProps> = ({ data, mpMode, on
       "zxcvbnm"
     ];
     
-    const maxErrors = Math.max(...Object.values(data.errors), 1);
+    // Fix: Explicitly cast Object.values to number[] to avoid 'unknown' type error in Math.max
+    const maxErrors = Math.max(...(Object.values(data.errors) as number[]), 1);
 
     return (
       <div className="flex flex-col gap-2 items-center select-none">
@@ -124,7 +125,8 @@ export const AnalysisScreen: React.FC<AnalysisScreenProps> = ({ data, mpMode, on
                     <div className="bg-gray-800/50 p-4 rounded border border-gray-700">
                         <div className="text-gray-500 text-xs uppercase">Errors</div>
                         <div className="text-2xl font-bold text-red-400 font-mono">
-                            {Object.values(data.errors).reduce((a, b) => a + b, 0)}
+                            {/* Fix: Explicitly type accumulator and current value for reduce to avoid 'unknown' type error */}
+                            {Object.values(data.errors).reduce((a: number, b: number) => a + b, 0)}
                         </div>
                     </div>
                 </div>

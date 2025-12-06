@@ -55,9 +55,10 @@ const FallbackCar = () => (
   </group>
 );
 
-const CarModelMesh = () => {
+const CarModelMesh = ({ isBraking }: { isBraking: boolean }) => {
     // Explicitly using the Audi model as requested
     const { scene } = useGLTF('./audi_pb18_e_tron_low_poly_3d.glb');
+    const brakeLightRef = useRef<THREE.Mesh>(null);
 
     const clone = useMemo(() => {
         const s = scene.clone();
@@ -69,35 +70,68 @@ const CarModelMesh = () => {
         return s;
     }, [scene]);
 
-    return <primitive object={clone} />;
+    // Add Brake Lights to the model scene manually if not present
+    // Position roughly where tail lights would be on this model
+    return (
+        <group>
+            <primitive object={clone} />
+            {/* Procedural Brake Lights Overlay */}
+            <group position={[0, 0.8, 2.3]}>
+                <mesh position={[-0.8, 0, 0]}>
+                    <sphereGeometry args={[0.1, 16, 16]} />
+                    <meshStandardMaterial 
+                        color="red" 
+                        emissive="red" 
+                        emissiveIntensity={isBraking ? 5 : 0.5} 
+                        toneMapped={false} 
+                    />
+                </mesh>
+                <mesh position={[0.8, 0, 0]}>
+                    <sphereGeometry args={[0.1, 16, 16]} />
+                    <meshStandardMaterial 
+                        color="red" 
+                        emissive="red" 
+                        emissiveIntensity={isBraking ? 5 : 0.5} 
+                        toneMapped={false} 
+                    />
+                </mesh>
+            </group>
+        </group>
+    );
 };
 
-export const Car: React.FC<CarProps> = ({ speed, tilt, curvature, lanePosition = 0 }) => {
+export const Car: React.FC<CarProps> = ({ speed, tilt, curvature, lanePosition = 0, isBraking = false }) => {
   const containerRef = useRef<Group>(null);
   const bodyRef = useRef<Group>(null);
   
   useFrame((state, delta) => {
     if (containerRef.current) {
-        // Smooth lane changing
-        containerRef.current.position.x = THREE.MathUtils.lerp(containerRef.current.position.x, lanePosition, delta * 5);
+        // Smooth lane changing - reduced Lerp speed for weightiness
+        containerRef.current.position.x = THREE.MathUtils.lerp(containerRef.current.position.x, lanePosition, delta * 3);
     }
 
     if (bodyRef.current) {
       const t = state.clock.getElapsedTime();
       
-      // Engine vibration
-      bodyRef.current.position.y = Math.sin(t * 40) * 0.005;
+      // Engine vibration - Subtle
+      bodyRef.current.position.y = Math.sin(t * 50) * 0.002;
       
-      // Acceleration tilt (nose up/down)
-      bodyRef.current.rotation.x = THREE.MathUtils.lerp(bodyRef.current.rotation.x, tilt, delta * 2);
+      // Pitch Logic:
+      // Accelerating (Positive Tilt/Speed) -> Nose Up (Negative Rotation X)
+      // Braking (isBraking) -> Nose Down (Positive Rotation X)
+      let targetPitch = 0;
+      if (isBraking) {
+          targetPitch = 0.05; // Reduced Nose Dive for stability
+      } else {
+          targetPitch = -speed * 0.03; // Reduced Squat for stability
+      }
       
-      // Banking into turns
-      const targetRoll = curvature * 0.15; 
-      bodyRef.current.rotation.z = THREE.MathUtils.lerp(bodyRef.current.rotation.z, targetRoll, delta * 2);
-
-      // Turning visual
-      const targetYaw = -curvature * 0.1;
-      bodyRef.current.rotation.y = THREE.MathUtils.lerp(bodyRef.current.rotation.y, targetYaw, delta * 2);
+      bodyRef.current.rotation.x = THREE.MathUtils.lerp(bodyRef.current.rotation.x, targetPitch, delta * 4);
+      
+      // STABILITY FIX: Removed banking (Z) and turning (Y) rotation.
+      // The car now stays perfectly straight to avoid "rotatory motion".
+      bodyRef.current.rotation.z = 0;
+      bodyRef.current.rotation.y = 0;
     }
   });
 
@@ -105,7 +139,7 @@ export const Car: React.FC<CarProps> = ({ speed, tilt, curvature, lanePosition =
     <group ref={containerRef}>
         <group ref={bodyRef}>
             <ModelErrorBoundary fallback={<FallbackCar />}>
-                <CarModelMesh />
+                <CarModelMesh isBraking={isBraking} />
             </ModelErrorBoundary>
         </group>
     </group>

@@ -12,10 +12,11 @@ interface GameSceneProps {
   multiplayerMode: MultiplayerMode;
   opponentStats?: OpponentStats;
   progress: number;
-  myCarModel: any; // Simplified, generic prop since we only use Audi now
+  myCarModel: any; 
+  isBraking?: boolean;
 }
 
-const SceneController = ({ speed, onUpdateCurvature }: { speed: number, onUpdateCurvature: (c: number) => void }) => {
+const SceneController = ({ speed, onUpdateCurvature, isBraking }: { speed: number, onUpdateCurvature: (c: number) => void, isBraking?: boolean }) => {
     const cameraRef = useRef<THREE.PerspectiveCamera>(null);
     const curveRef = useRef(0);
     const targetCurveRef = useRef(0);
@@ -24,31 +25,38 @@ const SceneController = ({ speed, onUpdateCurvature }: { speed: number, onUpdate
     useFrame((state, delta) => {
         timeRef.current += delta;
 
-        // Random curve generation
-        if (state.clock.elapsedTime % 5 < 0.05) {
-             targetCurveRef.current = (Math.random() - 0.5) * 50; // Stronger curves for shader effect
+        // Random curve generation - Less frequent updates for stability
+        if (state.clock.elapsedTime % 7 < 0.05) {
+             // Reduced max curvature significantly (from 40 to 5) to keep road straight
+             targetCurveRef.current = (Math.random() - 0.5) * 5; 
         }
         
-        curveRef.current = THREE.MathUtils.lerp(curveRef.current, targetCurveRef.current, delta * 0.5);
+        // Very smooth transition for curvature
+        curveRef.current = THREE.MathUtils.lerp(curveRef.current, targetCurveRef.current, delta * 0.3);
         onUpdateCurvature(curveRef.current);
 
         if (cameraRef.current) {
-            // Camera shake
-            const shake = speed * 0.05;
+            // Camera shake - Reduce significantly to stop "hovering" feeling
+            const shake = Math.max(0, speed * 0.02); 
             const xShake = (Math.random() - 0.5) * shake;
             const yShake = (Math.random() - 0.5) * shake;
 
             // Camera behavior 
-            const targetFOV = 60 + speed * 15; 
-            const targetY = 3.5; 
-            const targetZ = 8 + speed * 2; 
+            let targetFOV = 60 + speed * 15;
+            let targetZ = 8 + speed * 2;
+            
+            // Zoom in slightly when braking
+            if (isBraking) {
+                targetFOV -= 5;
+                targetZ -= 1;
+            }
 
             cameraRef.current.fov = THREE.MathUtils.lerp(cameraRef.current.fov, targetFOV, 0.05);
-            cameraRef.current.position.y = THREE.MathUtils.lerp(cameraRef.current.position.y, targetY + yShake, 0.05);
+            cameraRef.current.position.y = THREE.MathUtils.lerp(cameraRef.current.position.y, 3.5 + yShake, 0.05);
             cameraRef.current.position.z = THREE.MathUtils.lerp(cameraRef.current.position.z, targetZ, 0.05);
             
-            // Banking Camera into turn
-            const curveOffsetX = -curveRef.current * 0.05;
+            // Minimal Banking for Camera
+            const curveOffsetX = -curveRef.current * 0.02; // Reduced effect
             cameraRef.current.position.x = THREE.MathUtils.lerp(cameraRef.current.position.x, curveOffsetX + xShake, 0.05);
             
             cameraRef.current.lookAt(0, 1.5, -20); 
@@ -99,7 +107,8 @@ const OpponentCar = ({ stats, myProgress, curvature }: { stats: OpponentStats, m
     )
 }
 
-export const GameScene: React.FC<GameSceneProps> = ({ wpm, isMoving, multiplayerMode, opponentStats, progress }) => {
+export const GameScene: React.FC<GameSceneProps> = ({ wpm, isMoving, multiplayerMode, opponentStats, progress, isBraking }) => {
+  // Speed is now handled in App.tsx (including braking reduction) but we clamp it here just in case
   const speed = Math.min(wpm / 100, 1.5); 
   const displaySpeed = isMoving ? speed : 0;
   
@@ -112,7 +121,7 @@ export const GameScene: React.FC<GameSceneProps> = ({ wpm, isMoving, multiplayer
   return (
     <Canvas shadows dpr={[1, 2]}>
       <Suspense fallback={null}>
-        <SceneController speed={displaySpeed} onUpdateCurvature={setCurvature} />
+        <SceneController speed={displaySpeed} onUpdateCurvature={setCurvature} isBraking={isBraking} />
         <Sky sunPosition={[10, 10, 10]} turbidity={0.2} rayleigh={0.1} inclination={0.6} distance={1000} />
         <Environment preset="city" />
         
@@ -122,6 +131,7 @@ export const GameScene: React.FC<GameSceneProps> = ({ wpm, isMoving, multiplayer
             tilt={tilt} 
             curvature={curvature} 
             lanePosition={myLane} 
+            isBraking={isBraking}
         />
 
         {/* Opponent Car */}
@@ -129,7 +139,7 @@ export const GameScene: React.FC<GameSceneProps> = ({ wpm, isMoving, multiplayer
             <OpponentCar stats={opponentStats} myProgress={progress} curvature={curvature} />
         )}
 
-        <World speed={displaySpeed} curvature={curvature} />
+        <World speed={displaySpeed} curvature={curvature} isBraking={isBraking} />
       </Suspense>
     </Canvas>
   );

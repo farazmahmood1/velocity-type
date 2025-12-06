@@ -52,11 +52,13 @@ export interface CarProps {
   curvature: number; // For banking
   lanePosition?: number; // X offset
   modelType?: CarModel;
+  isBraking?: boolean;
 }
 
 export interface WorldProps {
   speed: number;
   curvature: number;
+  isBraking?: boolean;
 }
 
 export interface HistoryPoint {
@@ -73,60 +75,4 @@ export interface AnalysisData {
   totalTime: number;
   accuracy: number;
   difficulty: Difficulty;
-}
-
-// Augment React's JSX namespace to include Three.js elements
-declare module 'react' {
-  namespace JSX {
-    interface IntrinsicElements {
-      group: any;
-      mesh: any;
-      cylinderGeometry: any;
-      meshStandardMaterial: any;
-      boxGeometry: any;
-      planeGeometry: any;
-      sphereGeometry: any;
-      instancedMesh: any;
-      meshBasicMaterial: any;
-      coneGeometry: any;
-      hemisphereLight: any;
-      directionalLight: any;
-      fog: any;
-      shaderMaterial: any;
-      circleGeometry: any;
-      ambientLight: any;
-      pointLight: any;
-      spotLight: any;
-      primitive: any;
-      dodecahedronGeometry: any;
-    }
-  }
-}
-
-// Global augmentation for compatibility
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      group: any;
-      mesh: any;
-      cylinderGeometry: any;
-      meshStandardMaterial: any;
-      boxGeometry: any;
-      planeGeometry: any;
-      sphereGeometry: any;
-      instancedMesh: any;
-      meshBasicMaterial: any;
-      coneGeometry: any;
-      hemisphereLight: any;
-      directionalLight: any;
-      fog: any;
-      shaderMaterial: any;
-      circleGeometry: any;
-      ambientLight: any;
-      pointLight: any;
-      spotLight: any;
-      primitive: any;
-      dodecahedronGeometry: any;
-    }
-  }
 }
