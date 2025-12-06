@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameStatus, GameStats, Difficulty, MultiplayerMode, OpponentStats } from './types';
+import { GameStatus, GameStats, Difficulty, MultiplayerMode, OpponentStats, HistoryPoint, AnalysisData } from './types';
 import { fetchSentences } from './services/geminiService';
 import { GameScene } from './components/GameScene';
 import { TypingInterface } from './components/TypingInterface';
-import { AudioManager } from './components/AudioManager';
 import { multiplayer, GameMessage } from './services/multiplayerService';
+import { AnalysisScreen } from './components/AnalysisScreen';
 
 const GAME_DURATION = 120; // 2 minutes
 
@@ -20,18 +20,38 @@ const App: React.FC = () => {
   const [endTime, setEndTime] = useState<number | null>(null);
   const [totalCharsTyped, setTotalCharsTyped] = useState(0);
   const [correctChars, setCorrectChars] = useState(0);
-  const [lastGameStats, setLastGameStats] = useState<{wpm: number, accuracy: number, difficulty: Difficulty} | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(GAME_DURATION);
+
+  // Analysis Data Refs (Mutable to avoid re-renders)
+  const historyRef = useRef<HistoryPoint[]>([]);
+  const errorsRef = useRef<Record<string, number>>({});
+  const peakWpmRef = useRef(0);
+  const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
+
+  // Cars (Default Audi)
+  const myCar = 'audi';
 
   // Multiplayer
   const [mpMode, setMpMode] = useState<MultiplayerMode>(MultiplayerMode.SINGLE);
   const [myPeerId, setMyPeerId] = useState<string>('');
   const [hostIdInput, setHostIdInput] = useState('');
   const [isConnected, setIsConnected] = useState(false);
-  const [opponentStats, setOpponentStats] = useState<OpponentStats>({ wpm: 0, progress: 0, name: 'Opponent' });
+  const [opponentStats, setOpponentStats] = useState<OpponentStats>({ wpm: 0, progress: 0, name: 'Opponent', carModel: 'audi' });
   const [waitingForHostStart, setWaitingForHostStart] = useState(false);
 
-  // Stats Logic Reuse
+  // Refs for Game Loop (To avoid stale closures in setInterval)
+  const statsRef = useRef({
+      correctChars: 0,
+      totalCharsTyped: 0,
+      opponentStats: { wpm: 0, progress: 0, name: 'Opponent', carModel: 'audi' } as OpponentStats
+  });
+
+  // Keep statsRef synced with state
+  useEffect(() => {
+      statsRef.current = { correctChars, totalCharsTyped, opponentStats };
+  }, [correctChars, totalCharsTyped, opponentStats]);
+
+  // Stats Calculation Helpers
   const calculateWPM = useCallback(() => {
     if (!startTime) return 0;
     const now = endTime || Date.now();
@@ -55,12 +75,13 @@ const App: React.FC = () => {
         const interval = setInterval(() => {
             multiplayer.send('UPDATE', {
                 wpm: calculateWPM(),
-                progress: progress
+                progress: progress,
+                carModel: myCar 
             });
         }, 500);
         return () => clearInterval(interval);
     }
-  }, [status, mpMode, progress, calculateWPM]);
+  }, [status, mpMode, progress, calculateWPM, myCar]);
 
   // Setup Multiplayer Listeners
   useEffect(() => {
@@ -78,8 +99,8 @@ const App: React.FC = () => {
                 if (mpMode === MultiplayerMode.CLIENT) {
                     setSentences(msg.payload.sentences);
                     setDifficulty(msg.payload.difficulty);
+                    setOpponentStats(prev => ({ ...prev, carModel: msg.payload.hostCar }));
                     setWaitingForHostStart(false);
-                    // Start Game synced
                     startLocalGame();
                 }
                 break;
@@ -87,17 +108,17 @@ const App: React.FC = () => {
                 setOpponentStats(prev => ({
                     ...prev,
                     wpm: msg.payload.wpm,
-                    progress: msg.payload.progress
+                    progress: msg.payload.progress,
+                    carModel: msg.payload.carModel 
                 }));
                 break;
             case 'FINISH':
-                // Handle opponent finish if needed
                 break;
         }
     });
   }, [mpMode]);
 
-  // Timer Logic
+  // Timer & History Loop
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (status === GameStatus.PLAYING && startTime) {
@@ -108,13 +129,28 @@ const App: React.FC = () => {
         
         setTimeRemaining(Math.ceil(remaining));
 
+        // Use Ref data to avoid stale closures
+        const { correctChars: currCorrect, opponentStats: currOppStats } = statsRef.current;
+        
+        // Calculate WPM locally for history using ref data
+        const timeInMinutes = elapsed / 60;
+        const currentWpm = timeInMinutes > 0 ? Math.round((currCorrect / 5) / timeInMinutes) : 0;
+
+        if (currentWpm > peakWpmRef.current) peakWpmRef.current = currentWpm;
+        
+        historyRef.current.push({
+            time: elapsed,
+            wpm: currentWpm,
+            opponentWpm: mpMode !== MultiplayerMode.SINGLE ? currOppStats.wpm : undefined
+        });
+
         if (remaining <= 0) {
           endGame();
         }
       }, 500);
     }
     return () => clearInterval(interval);
-  }, [status, startTime]);
+  }, [status, startTime, mpMode]);
 
   const initMultiplayer = async (mode: MultiplayerMode) => {
       setMpMode(mode);
@@ -145,8 +181,11 @@ const App: React.FC = () => {
     setSentences(data);
     
     if (mpMode === MultiplayerMode.HOST) {
-        // Send data to client and start
-        multiplayer.send('INIT', { sentences: data, difficulty: selectedDifficulty });
+        multiplayer.send('INIT', { 
+            sentences: data, 
+            difficulty: selectedDifficulty,
+            hostCar: myCar
+        });
     }
 
     startLocalGame();
@@ -161,22 +200,38 @@ const App: React.FC = () => {
     setTotalCharsTyped(0);
     setCorrectChars(0);
     setEndTime(null);
-    setOpponentStats({ wpm: 0, progress: 0, name: 'Opponent' });
+    
+    // Reset Analysis Refs
+    historyRef.current = [];
+    errorsRef.current = {};
+    peakWpmRef.current = 0;
+    setAnalysisData(null);
   };
 
   const endGame = () => {
-    setEndTime(Date.now());
+    const end = Date.now();
+    setEndTime(end);
     setStatus(GameStatus.FINISHED);
     
-    const finalWpm = calculateWPM();
-    const finalAcc = calculateAccuracy();
+    // Calculate final stats using Ref data to ensure freshness
+    const { correctChars: finalCorrect, totalCharsTyped: finalTotal } = statsRef.current;
     
-    setLastGameStats({
-      wpm: finalWpm,
-      accuracy: finalAcc,
-      difficulty: difficulty
+    const elapsedMinutes = startTime ? (end - startTime) / 1000 / 60 : 0;
+    const finalWpm = elapsedMinutes > 0 ? Math.round((finalCorrect / 5) / elapsedMinutes) : 0;
+    const finalAcc = finalTotal > 0 ? Math.round((finalCorrect / finalTotal) * 100) : 100;
+    
+    // Prepare Analysis Data
+    const elapsedSeconds = startTime ? (end - startTime) / 1000 : 0;
+    setAnalysisData({
+        history: historyRef.current,
+        errors: errorsRef.current,
+        avgWpm: finalWpm,
+        peakWpm: peakWpmRef.current,
+        totalTime: elapsedSeconds,
+        accuracy: finalAcc,
+        difficulty: difficulty
     });
-    
+
     if(mpMode !== MultiplayerMode.SINGLE) {
         multiplayer.send('FINISH', { wpm: finalWpm });
     }
@@ -187,12 +242,20 @@ const App: React.FC = () => {
 
     const currentTarget = sentences[currentSentenceIndex];
     
-    const diff = input.length - userInput.length;
-    if (diff > 0) {
-        setTotalCharsTyped(prev => prev + diff);
+    // Determine if char was added
+    if (input.length > userInput.length) {
         const charIndex = input.length - 1;
-        if (input[charIndex] === currentTarget[charIndex]) {
+        const typedChar = input[charIndex];
+        const expectedChar = currentTarget[charIndex];
+
+        setTotalCharsTyped(prev => prev + 1);
+
+        if (typedChar === expectedChar) {
             setCorrectChars(prev => prev + 1);
+        } else {
+            // Record Error
+            const key = expectedChar.toLowerCase();
+            errorsRef.current[key] = (errorsRef.current[key] || 0) + 1;
         }
     }
 
@@ -210,16 +273,12 @@ const App: React.FC = () => {
     accuracy: calculateAccuracy(),
     progress: progress,
     timeLeft: timeRemaining,
-    lastScore: lastGameStats || undefined
   };
 
   const isMoving = status === GameStatus.PLAYING && stats.wpm > 5;
 
   return (
     <div className="relative w-full h-screen overflow-hidden bg-black font-sans text-white">
-      {/* Audio Manager */}
-      <AudioManager wpm={stats.wpm} gameStatus={status} />
-
       {/* 3D Background Layer */}
       <div className="absolute inset-0 z-0">
         <GameScene 
@@ -228,6 +287,7 @@ const App: React.FC = () => {
             multiplayerMode={mpMode} 
             opponentStats={opponentStats}
             progress={progress}
+            myCarModel={myCar}
         />
       </div>
 
@@ -255,7 +315,7 @@ const App: React.FC = () => {
                      <p className="text-gray-400 mb-4 font-mono tracking-widest">SELECT GAME MODE</p>
                      <div className="flex gap-4 justify-center">
                          <button 
-                            onClick={() => setMpMode(MultiplayerMode.SINGLE)} // Already single
+                            onClick={() => setMpMode(MultiplayerMode.SINGLE)} 
                             className="px-6 py-3 bg-cyan-600 rounded font-[Orbitron] border border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.5)]"
                          >
                             SINGLE PLAYER
@@ -356,67 +416,29 @@ const App: React.FC = () => {
                     </div>
                 </div>
             )}
-
-            {lastGameStats && (
-              <div className="p-4 bg-gray-800/50 rounded border border-gray-700 backdrop-blur">
-                <div className="flex justify-between items-center mb-2">
-                    <p className="text-xs uppercase text-gray-500">Last Run: {lastGameStats.difficulty}</p>
-                    <p className="text-xs uppercase text-gray-500">Time: 2:00</p>
-                </div>
-                <div className="flex justify-around">
-                  <div>
-                    <span className="block text-3xl font-bold text-white font-mono">{lastGameStats.wpm}</span>
-                    <span className="text-xs text-cyan-500 tracking-wider">WPM</span>
-                  </div>
-                  <div>
-                    <span className="block text-3xl font-bold text-white font-mono">{lastGameStats.accuracy}%</span>
-                    <span className="text-xs text-green-500 tracking-wider">ACCURACY</span>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
 
-      {status === GameStatus.FINISHED && (
-         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md">
-            <div className="max-w-lg w-full p-8 bg-gray-900 border-2 border-green-500/50 rounded-xl text-center shadow-2xl">
-               <h2 className="text-3xl font-[Orbitron] text-white mb-6">RACE COMPLETE</h2>
-               
-               <div className="grid grid-cols-2 gap-4 mb-8">
-                  <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-                     <p className="text-gray-400 text-sm uppercase tracking-wider">Top Speed</p>
-                     <p className="text-5xl font-bold text-cyan-400 font-mono mt-2">{stats.wpm}</p>
-                     <p className="text-xs text-cyan-600 mt-1">Words Per Minute</p>
-                  </div>
-                  <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-                     <p className="text-gray-400 text-sm uppercase tracking-wider">Precision</p>
-                     <p className="text-5xl font-bold text-green-400 font-mono mt-2">{stats.accuracy}%</p>
-                     <p className="text-xs text-green-600 mt-1">Accuracy</p>
-                  </div>
-               </div>
-               
-               {mpMode !== MultiplayerMode.SINGLE && (
-                   <div className="mb-8 p-4 bg-blue-900/30 border border-blue-500/30 rounded">
-                        <p className="text-blue-400 text-sm uppercase tracking-wider">Opponent Speed</p>
-                        <p className="text-3xl font-bold text-white font-mono mt-1">{opponentStats.wpm} WPM</p>
-                   </div>
-               )}
-
-               <button 
-                  onClick={() => {
-                      setStatus(GameStatus.IDLE);
-                      setMpMode(MultiplayerMode.SINGLE);
-                      multiplayer.cleanup();
-                      setIsConnected(false);
-                  }}
-                  className="px-8 py-4 bg-white text-black font-bold font-[Orbitron] rounded hover:bg-cyan-400 transition-colors uppercase tracking-widest w-full"
-               >
-                  Main Menu
-               </button>
-            </div>
-         </div>
+      {status === GameStatus.FINISHED && analysisData && (
+         <AnalysisScreen 
+            data={analysisData}
+            mpMode={mpMode}
+            onMenu={() => {
+                setStatus(GameStatus.IDLE);
+                setMpMode(MultiplayerMode.SINGLE);
+                multiplayer.cleanup();
+                setIsConnected(false);
+            }}
+            onRestart={() => {
+                // Keep multiplayer connection if active, just restart local state + sync
+                if (mpMode !== MultiplayerMode.SINGLE) {
+                     setStatus(GameStatus.IDLE);
+                } else {
+                     startGameWithDifficulty(difficulty);
+                }
+            }}
+         />
       )}
 
       {status === GameStatus.PLAYING && (

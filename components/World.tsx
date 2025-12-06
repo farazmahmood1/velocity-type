@@ -1,226 +1,230 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Mesh, ShaderMaterial, InstancedMesh, Object3D } from 'three';
 import * as THREE from 'three';
 import { WorldProps } from '../types';
 
-// Shader to curve the road
-const roadVertexShader = `
-uniform float uTime;
-uniform float uCurvature;
-varying vec2 vUv;
-varying float vZ;
+// --- Shaders for Bending World ---
 
-void main() {
-  vUv = uv;
-  vec3 pos = position;
-  
-  float zDist = pos.z + 10.0;
-  float curveAmount = uCurvature * 0.002;
-  pos.x += curveAmount * zDist * zDist;
-  
-  vZ = pos.z;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-}
-`;
+const RoadMaterial = {
+  uniforms: {
+    uTime: { value: 0 },
+    uCurvature: { value: 0 },
+    uColorCenter: { value: new THREE.Color('#333333') },
+    uColorEdge: { value: new THREE.Color('#222222') },
+    uColorLine: { value: new THREE.Color('#ffffff') }
+  },
+  vertexShader: `
+    uniform float uCurvature;
+    uniform float uTime;
+    varying vec2 vUv;
+    varying float vZ;
 
-const roadFragmentShader = `
-uniform sampler2D uMap;
-uniform float uTime;
-uniform float uSpeed;
-varying vec2 vUv;
-varying float vZ;
-
-void main() {
-  vec2 uv = vUv;
-  uv.y -= uTime * (uSpeed * 5.0 + 0.5);
-  
-  vec4 color = texture2D(uMap, uv);
-  
-  // Fog effect - brighter for day time
-  float fogDensity = 0.015;
-  float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vZ * vZ);
-  
-  // Mix with Sky Color (Light Blue)
-  gl_FragColor = mix(color, vec4(0.6, 0.8, 1.0, 1.0), clamp(fogFactor, 0.0, 1.0));
-}
-`;
-
-const RoadSegments = ({ speed, curvature }: { speed: number, curvature: number }) => {
-  const materialRef = useRef<ShaderMaterial>(null);
-  const texture = useMemo(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
-    const ctx = canvas.getContext('2d')!;
-    
-    // Road Asphalt
-    ctx.fillStyle = '#333';
-    ctx.fillRect(0, 0, 512, 512);
-    
-    // Add noise/grain to asphalt
-    for(let i=0; i<5000; i++) {
-        ctx.fillStyle = Math.random() > 0.5 ? '#444' : '#222';
-        ctx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
+    void main() {
+      vUv = uv;
+      vec3 pos = position;
+      
+      // Bending Logic: Bend X based on Z distance
+      float zDist = pos.z; 
+      // The further negative Z, the more we bend
+      pos.x += pow(abs(zDist), 2.0) * uCurvature * 0.0002;
+      
+      vZ = pos.z;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
     }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    uniform vec3 uColorCenter;
+    uniform vec3 uColorEdge;
+    uniform vec3 uColorLine;
+    varying vec2 vUv;
+    varying float vZ;
 
-    // Center Lines
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(250, 0, 12, 256); 
-    ctx.fillRect(250, 300, 12, 256); 
-    
-    // Side Lines
-    ctx.fillStyle = '#fff'; 
-    ctx.fillRect(10, 0, 10, 512);
-    ctx.fillRect(492, 0, 10, 512);
+    void main() {
+      // Create road gradient
+      float edge = abs(vUv.x - 0.5) * 2.0;
+      vec3 color = mix(uColorCenter, uColorEdge, pow(edge, 3.0));
 
-    // Curbs (Red and White strips)
-    // Draw on the very edges
-    const curbWidth = 30;
-    const stripHeight = 64;
-    for(let y=0; y<512; y+=stripHeight) {
-        ctx.fillStyle = (y/stripHeight) % 2 === 0 ? '#cc0000' : '#ffffff';
-        ctx.fillRect(0, y, curbWidth, stripHeight); // Left curb
-        ctx.fillRect(512 - curbWidth, y, curbWidth, stripHeight); // Right curb
+      // Dashed Lines
+      if (abs(vUv.x - 0.5) < 0.02) {
+        // Move lines with time
+        float dash = sin(vZ * 0.5 + uTime * 20.0);
+        if (dash > 0.0) {
+           color = uColorLine;
+        }
+      }
+      
+      // Side curbs (Red/White)
+      if (edge > 0.9) {
+          float strip = sin(vZ * 0.5 + uTime * 20.0);
+          color = strip > 0.0 ? vec3(1.0, 0.0, 0.0) : vec3(1.0, 1.0, 1.0);
+      }
+
+      gl_FragColor = vec4(color, 1.0);
     }
+  `
+};
 
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(1, 40); 
-    return tex;
-  }, []);
+const GrassMaterial = {
+  uniforms: {
+    uTime: { value: 0 },
+    uCurvature: { value: 0 },
+    uColor: { value: new THREE.Color('#4caf50') }
+  },
+  vertexShader: `
+    uniform float uCurvature;
+    varying vec2 vUv;
+    
+    void main() {
+      vUv = uv;
+      vec3 pos = position;
+      // Match road bending
+      float zDist = pos.z; 
+      pos.x += pow(abs(zDist), 2.0) * uCurvature * 0.0002;
+      
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 uColor;
+    varying vec2 vUv;
+
+    void main() {
+      // Simple noise/grid pattern
+      float grid = abs(sin(vUv.x * 50.0) * sin(vUv.y * 50.0));
+      vec3 color = mix(uColor, uColor * 0.8, grid * 0.2);
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `
+};
+
+// --- Procedural Components ---
+
+const DecorationObj = ({ position, type }: { position: [number, number, number], type: 'tree' | 'rock' }) => {
+    return (
+        <group position={position}>
+            {type === 'tree' ? (
+                <group>
+                    <mesh position={[0, 1.5, 0]}>
+                        <coneGeometry args={[1, 3, 8]} />
+                        <meshStandardMaterial color="#2d5a27" roughness={0.8} />
+                    </mesh>
+                    <mesh position={[0, 0, 0]}>
+                        <cylinderGeometry args={[0.3, 0.4, 1]} />
+                        <meshStandardMaterial color="#3e2723" />
+                    </mesh>
+                </group>
+            ) : (
+                <mesh position={[0, 0.5, 0]} rotation={[Math.random(), Math.random(), Math.random()]}>
+                    <dodecahedronGeometry args={[0.8]} />
+                    <meshStandardMaterial color="#795548" />
+                </mesh>
+            )}
+        </group>
+    );
+};
+
+export const World: React.FC<WorldProps> = ({ speed, curvature }) => {
+  const roadRef = useRef<THREE.Mesh>(null);
+  const grassLeftRef = useRef<THREE.Mesh>(null);
+  const grassRightRef = useRef<THREE.Mesh>(null);
+  const decoGroupRef = useRef<THREE.Group>(null);
+  
+  // Create shaders once
+  const roadMat = useMemo(() => new THREE.ShaderMaterial(RoadMaterial), []);
+  const grassMat = useMemo(() => new THREE.ShaderMaterial(GrassMaterial), []);
 
   useFrame((state, delta) => {
-    if (materialRef.current) {
-      materialRef.current.uniforms.uTime.value = state.clock.getElapsedTime();
-      materialRef.current.uniforms.uSpeed.value = speed;
-      materialRef.current.uniforms.uCurvature.value = THREE.MathUtils.lerp(
-          materialRef.current.uniforms.uCurvature.value,
-          curvature,
-          delta * 2
-      );
+    // Pass time and curvature to shaders
+    const effectiveSpeed = Math.max(speed, 0.1); // Keep idle movement
+    
+    // We increase uTime uniform to simulate forward movement in the texture
+    // The geometry stays static relative to Z, only X bends
+    if(roadRef.current) {
+        (roadRef.current.material as THREE.ShaderMaterial).uniforms.uTime.value += effectiveSpeed * delta;
+        (roadRef.current.material as THREE.ShaderMaterial).uniforms.uCurvature.value = THREE.MathUtils.lerp(
+             (roadRef.current.material as THREE.ShaderMaterial).uniforms.uCurvature.value,
+             curvature,
+             delta * 2
+        );
+    }
+    
+    if(grassLeftRef.current) {
+        (grassLeftRef.current.material as THREE.ShaderMaterial).uniforms.uCurvature.value = curvature;
+    }
+    if(grassRightRef.current) {
+        (grassRightRef.current.material as THREE.ShaderMaterial).uniforms.uCurvature.value = curvature;
+    }
+
+    // Move decorations physically
+    if (decoGroupRef.current) {
+        decoGroupRef.current.children.forEach((child) => {
+            child.position.z += effectiveSpeed * 40 * delta;
+            
+            // Loop decorations
+            if (child.position.z > 10) {
+                child.position.z = -150 - Math.random() * 50;
+            }
+            
+            // Apply bending to objects so they stick to the curved ground visual
+            // We approximate the shader's bending logic
+            const zDist = child.position.z;
+            const bendX = Math.pow(Math.abs(zDist), 2.0) * curvature * 0.0002;
+            
+            // Initial X offset needs to be preserved
+            const baseX = child.userData.baseX || child.position.x;
+            child.position.x = baseX + bendX;
+        });
     }
   });
 
-  const uniforms = useMemo(() => ({
-    uMap: { value: texture },
-    uTime: { value: 0 },
-    uSpeed: { value: 0 },
-    uCurvature: { value: 0 }
-  }), [texture]);
+  // Generate random decorations
+  const decorations = useMemo(() => {
+    const items = [];
+    for (let i = 0; i < 40; i++) {
+        const side = Math.random() > 0.5 ? 1 : -1;
+        const x = (8 + Math.random() * 15) * side;
+        const z = -Math.random() * 200;
+        const type = Math.random() > 0.8 ? 'rock' : 'tree';
+        items.push(<primitive object={new THREE.Group()} key={i} position={[x, 0, z]} userData={{ baseX: x }}>
+            <DecorationObj position={[0,0,0]} type={type} />
+        </primitive>);
+    }
+    return items;
+  }, []);
 
   return (
     <group>
-        {/* Road Surface */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]} receiveShadow>
-        <planeGeometry args={[14, 200, 20, 200]} />
-        <shaderMaterial
-            ref={materialRef}
-            vertexShader={roadVertexShader}
-            fragmentShader={roadFragmentShader}
-            uniforms={uniforms}
-        />
-        </mesh>
-        
-        {/* Grass Planes (Simple Green on sides) */}
-        {/* We use a large plane below road for grass */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.2, 0]} receiveShadow>
-            <planeGeometry args={[500, 500]} />
-            <meshStandardMaterial color="#4a8522" roughness={1} />
-        </mesh>
-    </group>
-  );
-};
+      {/* Road: 200 units long, 10 units wide */}
+      <mesh ref={roadRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -50]}>
+        <planeGeometry args={[12, 200, 20, 200]} />
+        <primitive object={roadMat} attach="material" />
+      </mesh>
 
-const Clouds = ({ speed }: { speed: number }) => {
-    const groupRef = useRef<THREE.Group>(null);
-    
-    useFrame((state, delta) => {
-        if(groupRef.current) {
-            // Clouds move slowly backwards
-            groupRef.current.position.z += (speed * 5 + 2) * delta;
-            if(groupRef.current.position.z > 50) {
-                groupRef.current.position.z = -200;
-            }
-        }
-    });
+      {/* Left Grass */}
+      <mesh ref={grassLeftRef} rotation={[-Math.PI / 2, 0, 0]} position={[-30, -0.1, -50]}>
+        <planeGeometry args={[50, 200, 20, 200]} />
+        <primitive object={grassMat} attach="material" />
+      </mesh>
 
-    return (
-        <group ref={groupRef} position={[0, 30, -100]}>
-            {/* Simple low poly cloud clusters */}
-            <mesh position={[-40, 0, 0]}>
-                <sphereGeometry args={[15, 7, 7]} />
-                <meshStandardMaterial color="white" flatShading opacity={0.8} transparent />
-            </mesh>
-             <mesh position={[30, 5, -20]}>
-                <sphereGeometry args={[20, 7, 7]} />
-                <meshStandardMaterial color="white" flatShading opacity={0.8} transparent />
-            </mesh>
-            <mesh position={[10, -5, 40]}>
-                <sphereGeometry args={[12, 7, 7]} />
-                <meshStandardMaterial color="white" flatShading opacity={0.8} transparent />
-            </mesh>
-        </group>
-    )
-}
+      {/* Right Grass */}
+      <mesh ref={grassRightRef} rotation={[-Math.PI / 2, 0, 0]} position={[30, -0.1, -50]}>
+        <planeGeometry args={[50, 200, 20, 200]} />
+        <primitive object={grassMat} attach="material" />
+      </mesh>
 
-const Scenery = ({ curvature }: { curvature: number }) => {
-    const groupRef = useRef<THREE.Group>(null);
+      {/* Decorations */}
+      <group ref={decoGroupRef}>
+          {decorations}
+      </group>
 
-    useFrame((state, delta) => {
-        if(groupRef.current) {
-             groupRef.current.rotation.y = THREE.MathUtils.lerp(
-                groupRef.current.rotation.y,
-                -curvature * 0.2, 
-                delta
-             );
-        }
-    });
-
-    return (
-        <group ref={groupRef}>
-             {/* Distant Mountains - Earth colors */}
-             <mesh position={[-60, -5, -100]}>
-                <coneGeometry args={[80, 70, 4]} />
-                <meshStandardMaterial color="#2d3a25" flatShading />
-             </mesh>
-             <mesh position={[-30, -5, -140]}>
-                <coneGeometry args={[90, 100, 4]} />
-                <meshStandardMaterial color="#3a4530" flatShading />
-             </mesh>
-             
-             <mesh position={[60, -5, -90]}>
-                <coneGeometry args={[70, 80, 4]} />
-                <meshStandardMaterial color="#2d3a25" flatShading />
-             </mesh>
-             <mesh position={[20, -5, -160]}>
-                <coneGeometry args={[100, 120, 4]} />
-                <meshStandardMaterial color="#1e261a" flatShading />
-             </mesh>
-        </group>
-    )
-}
-
-export const World: React.FC<WorldProps> = ({ speed, curvature }) => {
-  return (
-    <group>
-      <RoadSegments speed={speed} curvature={curvature} />
-      <Clouds speed={speed} />
-      <Scenery curvature={curvature} />
-      
-      {/* Daylight setup */}
-      <hemisphereLight intensity={0.6} groundColor="#4a8522" skyColor="#87CEEB" />
+      <hemisphereLight intensity={0.8} groundColor="#4a8522" skyColor="#87CEEB" />
       <directionalLight 
-        position={[50, 100, 50]} 
+        position={[50, 50, 20]} 
         intensity={1.5} 
         castShadow 
-        color="#fffaf0" 
-        shadow-bias={-0.001}
       />
-      
-      {/* Day fog */}
-      <fog attach="fog" args={['#87CEEB', 30, 200]} />
+      <fog attach="fog" args={['#87CEEB', 20, 120]} />
     </group>
   );
 };

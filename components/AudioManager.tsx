@@ -129,6 +129,7 @@ export const AudioManager: React.FC<AudioManagerProps> = ({ wpm, gameStatus }) =
       
       // Add some "wobble" to simulate uneven firing
       const wobble = Math.sin(now * 15) * 2;
+      
 
       osc1Ref.current?.frequency.setTargetAtTime(baseFreq + wobble, now, rampTime);
       osc2Ref.current?.frequency.setTargetAtTime((baseFreq + wobble) / 2, now, rampTime);

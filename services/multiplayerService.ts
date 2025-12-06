@@ -1,5 +1,4 @@
 import { Peer, DataConnection } from 'peerjs';
-import { Difficulty, OpponentStats } from '../types';
 
 export type MessageType = 'INIT' | 'START' | 'UPDATE' | 'FINISH';
 

@@ -1,145 +1,112 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo, Component, ReactNode } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Group } from 'three';
 import * as THREE from 'three';
+import { useGLTF } from '@react-three/drei';
 import { CarProps } from '../types';
 
-const Wheel = ({ position, rotation, speed, isFront, steerAngle }: { position: [number, number, number], rotation?: [number, number, number], speed: number, isFront?: boolean, steerAngle?: number }) => {
-  const wheelRef = useRef<Group>(null);
-  
-  useFrame((state, delta) => {
-    if (wheelRef.current) {
-      // Rotate wheels based on speed
-      const rollingMesh = wheelRef.current.children[0] as THREE.Mesh; 
-      if(rollingMesh) {
-         // Speed is positive, but we rotated the car 180 deg, so we might need to invert rotation direction relative to the mesh
-         rollingMesh.rotation.x += (speed * 20 + 5) * delta; 
-      }
-
-      if (isFront && steerAngle !== undefined) {
-         wheelRef.current.rotation.y = THREE.MathUtils.lerp(wheelRef.current.rotation.y, steerAngle, delta * 5);
-      }
+// Error Boundary to catch 404s/Loading Errors
+class ModelErrorBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { hasError: boolean }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error: any) {
+    console.warn("3D Model failed to load (using fallback):", error);
+  }
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
     }
-  });
+    return this.props.children;
+  }
+}
 
-  return (
-    <group ref={wheelRef} position={position} rotation={rotation as any}>
-      <group> 
-         <mesh rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.35, 0.35, 0.25, 32]} />
-            <meshStandardMaterial color="#1a1a1a" roughness={0.8} />
-         </mesh>
-         <mesh rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.2, 0.2, 0.26, 16]} />
-            <meshStandardMaterial color="#333" metalness={0.8} />
-         </mesh>
-      </group>
-    </group>
-  );
+// Fallback Procedural Car (Futuristic Box)
+const FallbackCar = () => (
+  <group>
+    <mesh position={[0, 0.4, 0]}>
+      <boxGeometry args={[1.8, 0.6, 4]} />
+      <meshStandardMaterial color="#00bcd4" roughness={0.3} metalness={0.8} />
+    </mesh>
+    <mesh position={[0, 0.9, -0.2]}>
+      <boxGeometry args={[1.4, 0.5, 2]} />
+      <meshStandardMaterial color="#111" roughness={0.1} metalness={0.9} />
+    </mesh>
+    <mesh position={[-0.9, 0.35, 1.2]} rotation={[0, 0, Math.PI / 2]}>
+      <cylinderGeometry args={[0.35, 0.35, 0.4, 16]} />
+      <meshStandardMaterial color="#333" />
+    </mesh>
+    <mesh position={[0.9, 0.35, 1.2]} rotation={[0, 0, Math.PI / 2]}>
+      <cylinderGeometry args={[0.35, 0.35, 0.4, 16]} />
+      <meshStandardMaterial color="#333" />
+    </mesh>
+    <mesh position={[-0.9, 0.35, -1.2]} rotation={[0, 0, Math.PI / 2]}>
+      <cylinderGeometry args={[0.35, 0.35, 0.4, 16]} />
+      <meshStandardMaterial color="#333" />
+    </mesh>
+    <mesh position={[0.9, 0.35, -1.2]} rotation={[0, 0, Math.PI / 2]}>
+      <cylinderGeometry args={[0.35, 0.35, 0.4, 16]} />
+      <meshStandardMaterial color="#333" />
+    </mesh>
+  </group>
+);
+
+const CarModelMesh = () => {
+    // Explicitly using the Audi model as requested
+    const { scene } = useGLTF('./audi_pb18_e_tron_low_poly_3d.glb');
+
+    const clone = useMemo(() => {
+        const s = scene.clone();
+        // Adjust scale to fit the new procedural track
+        s.scale.set(3.5, 3.5, 3.5); 
+        // Rotate to face away from camera (driving forward)
+        s.rotation.y = Math.PI; 
+        s.position.y = 0; // Sit on the ground
+        return s;
+    }, [scene]);
+
+    return <primitive object={clone} />;
 };
 
-export const Car: React.FC<CarProps> = ({ speed, tilt, curvature, color = "#e60000", lanePosition = 0 }) => {
-  const chassisRef = useRef<Group>(null);
+export const Car: React.FC<CarProps> = ({ speed, tilt, curvature, lanePosition = 0 }) => {
   const containerRef = useRef<Group>(null);
+  const bodyRef = useRef<Group>(null);
   
   useFrame((state, delta) => {
     if (containerRef.current) {
-        // Smoothly move to lane position
+        // Smooth lane changing
         containerRef.current.position.x = THREE.MathUtils.lerp(containerRef.current.position.x, lanePosition, delta * 5);
     }
 
-    if (chassisRef.current) {
-      // Subtle engine vibration
+    if (bodyRef.current) {
       const t = state.clock.getElapsedTime();
-      chassisRef.current.position.y = 0.6 + Math.sin(t * 30) * 0.005;
       
-      // Pitch (Tilt)
-      // When accelerating (speed up), car tilts back (positive X in local space if facing -Z, but we rotated 180)
-      // We are facing +Z (world) but rotated 180, so local forward is -Z.
-      chassisRef.current.rotation.x = THREE.MathUtils.lerp(chassisRef.current.rotation.x, tilt, delta * 2);
+      // Engine vibration
+      bodyRef.current.position.y = Math.sin(t * 40) * 0.005;
+      
+      // Acceleration tilt (nose up/down)
+      bodyRef.current.rotation.x = THREE.MathUtils.lerp(bodyRef.current.rotation.x, tilt, delta * 2);
+      
+      // Banking into turns
+      const targetRoll = curvature * 0.15; 
+      bodyRef.current.rotation.z = THREE.MathUtils.lerp(bodyRef.current.rotation.z, targetRoll, delta * 2);
 
-      // Roll (Banking)
-      // Right turn (curvature > 0) -> Body leans Left (Rotate Z positive)
-      const targetRoll = curvature * 0.15;
-      chassisRef.current.rotation.z = THREE.MathUtils.lerp(chassisRef.current.rotation.z, targetRoll, delta * 2);
-
-      // Yaw (Turning)
-      const targetYaw = curvature * 0.1;
-      chassisRef.current.rotation.y = THREE.MathUtils.lerp(chassisRef.current.rotation.y, targetYaw + Math.PI, delta * 2);
+      // Turning visual
+      const targetYaw = -curvature * 0.1;
+      bodyRef.current.rotation.y = THREE.MathUtils.lerp(bodyRef.current.rotation.y, targetYaw, delta * 2);
     }
   });
 
-  // Calculate steer angle for front wheels
-  // Curvature > 0 is right turn. Wheels should point right (negative Y in local inverted space?)
-  const steerAngle = -curvature * 0.3;
-
   return (
     <group ref={containerRef}>
-        {/* Initial rotation Math.PI to face away from camera */}
-        <group ref={chassisRef} rotation={[0, Math.PI, 0]}>
-        {/* Main Body */}
-        <mesh position={[0, 0.2, 0]} castShadow receiveShadow>
-            <boxGeometry args={[1.8, 0.5, 4]} />
-            <meshStandardMaterial color={color} metalness={0.6} roughness={0.2} />
-        </mesh>
-        
-        {/* Cabin/Cockpit */}
-        <mesh position={[0, 0.7, -0.2]} castShadow>
-            <boxGeometry args={[1.4, 0.5, 2]} />
-            <meshStandardMaterial color="#111" metalness={0.9} roughness={0.1} />
-        </mesh>
-
-        {/* Hood Scoop */}
-        <mesh position={[0, 0.46, 1.2]} castShadow>
-            <boxGeometry args={[1.0, 0.1, 1.0]} />
-            <meshStandardMaterial color="#111" />
-        </mesh>
-
-        {/* Spoiler */}
-        <group position={[0, 0.6, -1.8]}>
-            <mesh position={[0, 0.3, 0]}>
-            <boxGeometry args={[1.9, 0.1, 0.4]} />
-            <meshStandardMaterial color="#111" />
-            </mesh>
-            <mesh position={[-0.7, 0, 0]}>
-            <boxGeometry args={[0.1, 0.6, 0.2]} />
-            <meshStandardMaterial color="#111" />
-            </mesh>
-            <mesh position={[0.7, 0, 0]}>
-            <boxGeometry args={[0.1, 0.6, 0.2]} />
-            <meshStandardMaterial color="#111" />
-            </mesh>
-        </group>
-
-        {/* Headlights (Front is +Z in local space) */}
-        <mesh position={[-0.6, 0.2, 2.01]}>
-            <boxGeometry args={[0.4, 0.2, 0.1]} />
-            <meshStandardMaterial color="#ccffcc" emissive="#ccffcc" emissiveIntensity={2} />
-        </mesh>
-        <mesh position={[0.6, 0.2, 2.01]}>
-            <boxGeometry args={[0.4, 0.2, 0.1]} />
-            <meshStandardMaterial color="#ccffcc" emissive="#ccffcc" emissiveIntensity={2} />
-        </mesh>
-
-        {/* Taillights (Back is -Z in local space) */}
-        <mesh position={[0, 0.3, -2.01]}>
-            <boxGeometry args={[1.6, 0.15, 0.1]} />
-            <meshStandardMaterial color="#ff0000" emissive="#ff0000" emissiveIntensity={speed > 0 ? 2 : 5} /> 
-        </mesh>
-        {/* License Plate area */}
-        <mesh position={[0, 0.15, -2.02]}>
-            <planeGeometry args={[0.6, 0.2]} />
-            <meshStandardMaterial color="#fff" />
-        </mesh>
-
-        {/* Wheels */}
-        {/* Front Wheels Steer */}
-        <Wheel position={[-0.9, 0, 1.2]} speed={speed} isFront steerAngle={steerAngle} />
-        <Wheel position={[0.9, 0, 1.2]} speed={speed} isFront steerAngle={steerAngle} />
-        
-        {/* Rear Wheels Fixed */}
-        <Wheel position={[-0.9, 0, -1.2]} speed={speed} />
-        <Wheel position={[0.9, 0, -1.2]} speed={speed} />
+        <group ref={bodyRef}>
+            <ModelErrorBoundary fallback={<FallbackCar />}>
+                <CarModelMesh />
+            </ModelErrorBoundary>
         </group>
     </group>
   );

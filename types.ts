@@ -20,6 +20,9 @@ export enum MultiplayerMode {
   CLIENT = 'CLIENT'
 }
 
+// We simplified to just one main model, so we don't need a union type anymore
+export type CarModel = string; 
+
 export interface GameStats {
   wpm: number;
   accuracy: number;
@@ -36,6 +39,7 @@ export interface OpponentStats {
   wpm: number;
   progress: number;
   name: string;
+  carModel?: CarModel;
 }
 
 export interface SentenceData {
@@ -45,14 +49,30 @@ export interface SentenceData {
 export interface CarProps {
   speed: number; // 0 to 1 intensity
   tilt: number; // For acceleration/braking effect
-  curvature: number; // -1 (left) to 1 (right)
-  color?: string;
+  curvature: number; // For banking
   lanePosition?: number; // X offset
+  modelType?: CarModel;
 }
 
 export interface WorldProps {
   speed: number;
   curvature: number;
+}
+
+export interface HistoryPoint {
+  time: number;
+  wpm: number;
+  opponentWpm?: number;
+}
+
+export interface AnalysisData {
+  history: HistoryPoint[];
+  errors: Record<string, number>; // char -> count
+  avgWpm: number;
+  peakWpm: number;
+  totalTime: number;
+  accuracy: number;
+  difficulty: Difficulty;
 }
 
 // Augment React's JSX namespace to include Three.js elements
@@ -78,6 +98,7 @@ declare module 'react' {
       pointLight: any;
       spotLight: any;
       primitive: any;
+      dodecahedronGeometry: any;
     }
   }
 }
@@ -105,6 +126,7 @@ declare global {
       pointLight: any;
       spotLight: any;
       primitive: any;
+      dodecahedronGeometry: any;
     }
   }
 }

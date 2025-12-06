@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useRef, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { PerspectiveCamera, Environment, Sky } from '@react-three/drei';
 import * as THREE from 'three';
@@ -12,6 +12,7 @@ interface GameSceneProps {
   multiplayerMode: MultiplayerMode;
   opponentStats?: OpponentStats;
   progress: number;
+  myCarModel: any; // Simplified, generic prop since we only use Audi now
 }
 
 const SceneController = ({ speed, onUpdateCurvature }: { speed: number, onUpdateCurvature: (c: number) => void }) => {
@@ -23,8 +24,9 @@ const SceneController = ({ speed, onUpdateCurvature }: { speed: number, onUpdate
     useFrame((state, delta) => {
         timeRef.current += delta;
 
-        if (state.clock.elapsedTime % 5 < 0.1) {
-             targetCurveRef.current = (Math.random() - 0.5) * 2;
+        // Random curve generation
+        if (state.clock.elapsedTime % 5 < 0.05) {
+             targetCurveRef.current = (Math.random() - 0.5) * 50; // Stronger curves for shader effect
         }
         
         curveRef.current = THREE.MathUtils.lerp(curveRef.current, targetCurveRef.current, delta * 0.5);
@@ -36,27 +38,25 @@ const SceneController = ({ speed, onUpdateCurvature }: { speed: number, onUpdate
             const xShake = (Math.random() - 0.5) * shake;
             const yShake = (Math.random() - 0.5) * shake;
 
-            // Camera behavior
-            const targetFOV = 60 + speed * 40; 
-            const targetY = 3.5 - speed * 1.5;
-            const targetZ = 8 + speed * 3;
+            // Camera behavior 
+            const targetFOV = 60 + speed * 15; 
+            const targetY = 3.5; 
+            const targetZ = 8 + speed * 2; 
 
             cameraRef.current.fov = THREE.MathUtils.lerp(cameraRef.current.fov, targetFOV, 0.05);
             cameraRef.current.position.y = THREE.MathUtils.lerp(cameraRef.current.position.y, targetY + yShake, 0.05);
             cameraRef.current.position.z = THREE.MathUtils.lerp(cameraRef.current.position.z, targetZ, 0.05);
             
-            const curveOffsetX = -curveRef.current * 3;
-            // Always center on lane 0 or slightly offset if multiplayer?
-            // Let's keep camera centered on 0, and move players to lanes
+            // Banking Camera into turn
+            const curveOffsetX = -curveRef.current * 0.05;
             cameraRef.current.position.x = THREE.MathUtils.lerp(cameraRef.current.position.x, curveOffsetX + xShake, 0.05);
-
-            // Look ahead into the road
-            cameraRef.current.lookAt(curveRef.current * 10, 0.5, -30); 
+            
+            cameraRef.current.lookAt(0, 1.5, -20); 
             cameraRef.current.updateProjectionMatrix();
         }
     });
 
-    return <PerspectiveCamera makeDefault position={[0, 3, 8]} ref={cameraRef} />;
+    return <PerspectiveCamera makeDefault position={[0, 4, 10]} ref={cameraRef} />;
 }
 
 // Wrapper for opponent logic
@@ -66,19 +66,10 @@ const OpponentCar = ({ stats, myProgress, curvature }: { stats: OpponentStats, m
 
     useFrame((state, delta) => {
         if(groupRef.current) {
-            // Calculate relative position
-            // If opponent progress > myProgress, they should be ahead (negative Z)
-            // If opponent progress < myProgress, they should be behind (positive Z)
-            
-            // Scale factor: how many meters of visual distance corresponds to 100% progress?
-            // Let's say track length is ~1000 meters visually for the race duration
-            const TRACK_SCALE = 500; 
-            
+            // Scale factor: how far visually is the opponent?
+            const TRACK_SCALE = 100; 
             const progressDiff = myProgress - stats.progress; 
-            
-            // If I am winning (progressDiff > 0), opponent falls back (Positive Z)
-            // If Opponent winning (progressDiff < 0), opponent goes ahead (Negative Z)
-            const targetZ = progressDiff * TRACK_SCALE;
+            const targetZ = progressDiff * TRACK_SCALE; // Positive means I'm ahead (opponent is behind/positive Z)
             
             zPosRef.current = THREE.MathUtils.lerp(zPosRef.current, targetZ, delta * 2);
             groupRef.current.position.z = zPosRef.current;
@@ -90,14 +81,19 @@ const OpponentCar = ({ stats, myProgress, curvature }: { stats: OpponentStats, m
 
     return (
         <group ref={groupRef}>
-            <Car speed={speed} tilt={tilt} curvature={curvature} color="#0066cc" lanePosition={2.5} />
+            {/* Opponent is on the right lane offset */}
+            <Car 
+                speed={speed} 
+                tilt={tilt} 
+                curvature={curvature} 
+                lanePosition={3.5} 
+            />
             {/* Name Tag */}
-             <group position={[2.5, 2.5, 0]}>
+             <group position={[3.5, 3, 0]}>
                  <mesh>
-                    <planeGeometry args={[2, 0.5]} />
+                    <planeGeometry args={[3, 0.8]} />
                     <meshBasicMaterial color="#000" opacity={0.5} transparent />
                  </mesh>
-                 {/* Text would be ideal here but for simplicity just a colored indicator */}
              </group>
         </group>
     )
@@ -110,19 +106,23 @@ export const GameScene: React.FC<GameSceneProps> = ({ wpm, isMoving, multiplayer
   const tilt = isMoving ? -0.05 * speed : 0.02;
   const [curvature, setCurvature] = useState(0);
 
-  // In Multiplayer: My Lane is -2.5 (Left), Opponent is 2.5 (Right)
-  // In Single Player: Lane is 0
-  const myLane = multiplayerMode === MultiplayerMode.SINGLE ? 0 : -2.5;
+  // My lane is center (0) for single, slightly left for multi
+  const myLane = multiplayerMode === MultiplayerMode.SINGLE ? 0 : -2.0;
 
   return (
     <Canvas shadows dpr={[1, 2]}>
       <Suspense fallback={null}>
         <SceneController speed={displaySpeed} onUpdateCurvature={setCurvature} />
-        <Sky sunPosition={[100, 20, 100]} turbidity={0.5} rayleigh={0.5} />
-        <Environment preset="park" />
+        <Sky sunPosition={[10, 10, 10]} turbidity={0.2} rayleigh={0.1} inclination={0.6} distance={1000} />
+        <Environment preset="city" />
         
         {/* My Car */}
-        <Car speed={displaySpeed} tilt={tilt} curvature={curvature} color="#e60000" lanePosition={myLane} />
+        <Car 
+            speed={displaySpeed} 
+            tilt={tilt} 
+            curvature={curvature} 
+            lanePosition={myLane} 
+        />
 
         {/* Opponent Car */}
         {multiplayerMode !== MultiplayerMode.SINGLE && opponentStats && (
